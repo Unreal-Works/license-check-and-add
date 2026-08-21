@@ -13,7 +13,7 @@ cargo install license-check-and-add
 license-check-and-add is run using the following command either in your terminal if installed globally or as an npm script if installed locally to a module.
 
 ```bash
-license-check-and-add [check|add|remove] [-f path/to/config.json]
+license-check-and-add [check|add|remove] [PATH ...] [-f path/to/config.json]
 ```
 
 The tool will check against files in the directory and its sub-directories unless they are specifically ignored. By default the command will ignore the following directories:
@@ -37,6 +37,8 @@ and files with the extensations:
 You can turn off this default ignoring in the config file.
 
 The config file is optional. If `-f` is omitted, the tool uses its built-in defaults and reads the unformatted license from `LICENSE` in the current directory.
+
+Pass one or more file paths after the subcommand to process only those files. This is useful for pre-commit hooks, for example `license-check-and-add check src/lib.rs`.
 
 ### Additional command options
 

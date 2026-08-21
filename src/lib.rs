@@ -124,15 +124,37 @@ pub fn execute(
     replacements: Option<Vec<String>>,
 ) -> Result<Report, AppError> {
     let config = load_config(root, config_path, mode, replacements)?;
-    execute_with_config(root, config, mode)
+    execute_with_config(root, config, mode, None)
 }
 
 pub fn execute_without_config(root: &Path, mode: Mode) -> Result<Report, AppError> {
-    execute_with_config(root, default_config(root)?, mode)
+    execute_with_config(root, default_config(root)?, mode, None)
 }
 
-fn execute_with_config(root: &Path, config: Config, mode: Mode) -> Result<Report, AppError> {
-    let paths = discover_files(root, &config)?;
+pub fn execute_paths(
+    root: &Path,
+    config_path: Option<&Path>,
+    mode: Mode,
+    replacements: Option<Vec<String>>,
+    paths: &[PathBuf],
+) -> Result<Report, AppError> {
+    let config = match config_path {
+        Some(config_path) => load_config(root, config_path, mode, replacements)?,
+        None => default_config(root)?,
+    };
+    execute_with_config(root, config, mode, Some(paths))
+}
+
+fn execute_with_config(
+    root: &Path,
+    config: Config,
+    mode: Mode,
+    selected_paths: Option<&[PathBuf]>,
+) -> Result<Report, AppError> {
+    let paths = match selected_paths {
+        Some(paths) => select_files(root, paths)?,
+        None => discover_files(root, &config)?,
+    };
     manage_files(root, &config, paths, mode)
 }
 
@@ -148,6 +170,23 @@ fn default_config(root: &Path) -> Result<Config, AppError> {
         regex: None,
         trim_trailing_whitespace: false,
     })
+}
+
+fn select_files(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, AppError> {
+    paths
+        .iter()
+        .map(|path| {
+            let resolved = resolve_path(root, path);
+            match fs::metadata(&resolved) {
+                Ok(metadata) if metadata.is_file() => Ok(resolved),
+                Ok(_) => Err(AppError::Message(format!(
+                    "Path is not a file: {}",
+                    path.display()
+                ))),
+                Err(error) => Err(AppError::Io(error)),
+            }
+        })
+        .collect()
 }
 
 fn load_config(
@@ -1013,5 +1052,22 @@ mod tests {
 
         let report = execute_without_config(directory.path(), Mode::Check).unwrap();
         assert!(report.missing.is_empty());
+    }
+
+    #[test]
+    fn executes_only_selected_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("LICENSE"), "license text\n").unwrap();
+        fs::write(directory.path().join("selected.toml"), "body\n").unwrap();
+        fs::write(directory.path().join("unselected.toml"), "body\n").unwrap();
+        let selected = [PathBuf::from("selected.toml")];
+
+        let report = execute_paths(directory.path(), None, Mode::Add, None, &selected).unwrap();
+
+        assert_eq!(report.inserted, vec![PathBuf::from("selected.toml")]);
+        assert_eq!(
+            fs::read_to_string(directory.path().join("unselected.toml")).unwrap(),
+            "body\n"
+        );
     }
 }

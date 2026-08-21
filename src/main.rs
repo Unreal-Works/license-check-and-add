@@ -28,6 +28,8 @@ enum Command {
 struct CommonArgs {
     #[arg(short = 'f', long = "config-file", env = "LICENCE_CHECK_CONFIG_FILE")]
     config_file: Option<PathBuf>,
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -41,6 +43,8 @@ struct AddArgs {
         num_args = 1..
     )]
     regex_replacements: Option<Vec<String>>,
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
 }
 
 fn main() {
@@ -50,14 +54,29 @@ fn main() {
         process::exit(1);
     });
 
-    let (mode, config_file, replacements) = match cli.command {
-        Command::Check(args) => (Mode::Check, args.config_file, None),
-        Command::Add(args) => (Mode::Add, args.config_file, args.regex_replacements),
-        Command::Remove(args) => (Mode::Remove, args.config_file, None),
+    let (mode, config_file, replacements, paths) = match cli.command {
+        Command::Check(args) => (Mode::Check, args.config_file, None, args.paths),
+        Command::Add(args) => (
+            Mode::Add,
+            args.config_file,
+            args.regex_replacements,
+            args.paths,
+        ),
+        Command::Remove(args) => (Mode::Remove, args.config_file, None, args.paths),
     };
-    let result = match config_file {
-        Some(config_file) => execute(&root, &config_file, mode, replacements),
-        None => execute_without_config(&root, mode),
+    let result = if paths.is_empty() {
+        match config_file {
+            Some(config_file) => execute(&root, &config_file, mode, replacements),
+            None => execute_without_config(&root, mode),
+        }
+    } else {
+        license_check_and_add::execute_paths(
+            &root,
+            config_file.as_deref(),
+            mode,
+            replacements,
+            &paths,
+        )
     };
 
     match result {
