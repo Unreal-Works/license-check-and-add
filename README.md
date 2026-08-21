@@ -175,7 +175,7 @@ Specifying a format object to write at the start and end of each line of the lic
 
 ```json
 {
-  "gitignore|npmignore|eslintignore|dockerignore|sh|py": {
+  "gitignore|npmignore|eslintignore|dockerignore|sh|py|toml|yml|^Dockerfile": {
     "eachLine": {
       "prepend": "# "
     }

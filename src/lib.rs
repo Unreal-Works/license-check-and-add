@@ -371,6 +371,7 @@ impl<'a> Formatter<'a> {
                     "gitignore|npmignore|eslintignore|dockerignore|sh|py",
                     each_line("# ", None),
                 ),
+                ("toml|yml|^Dockerfile", each_line("# ", None)),
                 ("html|xml|svg", wrapped("<!--", "-->")),
                 (
                     "js|ts|css|scss|less|php|as|c|java|cpp|go|cto|acl",
@@ -869,6 +870,29 @@ mod tests {
                 .unwrap(),
             ["# license", "# with", "#", "# blank"].join(EOL)
         );
+    }
+
+    #[test]
+    fn uses_hash_format_for_toml_yaml_and_dockerfile_defaults() {
+        let config = Config {
+            default_format: Format::default(),
+            ignore_default_ignores: true,
+            ignore: Vec::new(),
+            ignore_file: None,
+            license: String::new(),
+            license_formats: HashMap::new(),
+            output: None,
+            regex: None,
+            trim_trailing_whitespace: true,
+        };
+        let formatter = Formatter::new(Path::new("."), &config);
+
+        for key in [".toml", ".yml", "Dockerfile"] {
+            assert_eq!(
+                formatter.format(key, "license\nwith\n").unwrap(),
+                ["# license", "# with"].join(EOL)
+            );
+        }
     }
 
     #[test]
