@@ -217,7 +217,18 @@ fn discover_files(root: &Path, config: &Config) -> Result<Vec<PathBuf>, AppError
         .map(|path| normalize_relative_path(root, &resolve_path(root, path)));
     let mut paths = Vec::new();
 
-    for entry in WalkDir::new(root).follow_links(false) {
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            if entry.path() == root {
+                return true;
+            }
+            let relative = normalize_relative_path(root, entry.path());
+            !is_ignored(&relative, entry.file_type().is_dir(), &rules).unwrap_or(false)
+        });
+
+    for entry in walker {
         let entry = entry.map_err(|error| {
             error
                 .into_io_error()
