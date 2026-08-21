@@ -12,6 +12,7 @@ use walkdir::WalkDir;
 const DEFAULT_IGNORES: &[&str] = &[
     "**/node_modules",
     "**/dist",
+    "**/target",
     "**/.git",
     "**/LICENSE*",
     "**/*.png",
@@ -123,8 +124,30 @@ pub fn execute(
     replacements: Option<Vec<String>>,
 ) -> Result<Report, AppError> {
     let config = load_config(root, config_path, mode, replacements)?;
+    execute_with_config(root, config, mode)
+}
+
+pub fn execute_without_config(root: &Path, mode: Mode) -> Result<Report, AppError> {
+    execute_with_config(root, default_config(root)?, mode)
+}
+
+fn execute_with_config(root: &Path, config: Config, mode: Mode) -> Result<Report, AppError> {
     let paths = discover_files(root, &config)?;
     manage_files(root, &config, paths, mode)
+}
+
+fn default_config(root: &Path) -> Result<Config, AppError> {
+    Ok(Config {
+        default_format: default_format(),
+        ignore_default_ignores: false,
+        ignore: Vec::new(),
+        ignore_file: None,
+        license: fs::read_to_string(resolve_path(root, Path::new("LICENSE")))?,
+        license_formats: HashMap::new(),
+        output: None,
+        regex: None,
+        trim_trailing_whitespace: false,
+    })
 }
 
 fn load_config(
@@ -971,5 +994,24 @@ mod tests {
         assert!(report.missing.is_empty());
         let report = execute(directory.path(), config_path, Mode::Remove, None).unwrap();
         assert_eq!(report.removed.len(), 1);
+    }
+
+    #[test]
+    fn executes_without_config_using_license_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("LICENSE"), "license text\n").unwrap();
+        fs::write(directory.path().join("file.toml"), "body\n").unwrap();
+        fs::create_dir(directory.path().join("target")).unwrap();
+        fs::write(directory.path().join("target/artifact"), [0, 255]).unwrap();
+
+        let report = execute_without_config(directory.path(), Mode::Add).unwrap();
+        assert_eq!(report.inserted, vec![PathBuf::from("file.toml")]);
+        assert_eq!(
+            fs::read_to_string(directory.path().join("file.toml")).unwrap(),
+            format!("# license text{EOL}body\n")
+        );
+
+        let report = execute_without_config(directory.path(), Mode::Check).unwrap();
+        assert!(report.missing.is_empty());
     }
 }

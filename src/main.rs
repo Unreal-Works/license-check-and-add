@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Args, Parser, Subcommand};
-use license_check_and_add::{AppError, Mode, execute, print_missing, print_report};
+use license_check_and_add::{
+    AppError, Mode, execute, execute_without_config, print_missing, print_report,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -53,9 +55,12 @@ fn main() {
         Command::Add(args) => (Mode::Add, args.config_file, args.regex_replacements),
         Command::Remove(args) => (Mode::Remove, args.config_file, None),
     };
-    let config_file = config_file.unwrap_or_else(|| root.join("license-checker-config.json"));
+    let result = match config_file {
+        Some(config_file) => execute(&root, &config_file, mode, replacements),
+        None => execute_without_config(&root, mode),
+    };
 
-    match execute(&root, &config_file, mode, replacements) {
+    match result {
         Ok(report) => {
             print_report(&report, mode);
             println!("Command succeeded");
