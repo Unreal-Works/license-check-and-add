@@ -152,7 +152,7 @@ fn execute_with_config(
     selected_paths: Option<&[PathBuf]>,
 ) -> Result<Report, AppError> {
     let paths = match selected_paths {
-        Some(paths) => select_files(root, paths)?,
+        Some(paths) => select_files(root, &config, paths)?,
         None => discover_files(root, &config)?,
     };
     manage_files(root, &config, paths, mode)
@@ -172,21 +172,29 @@ fn default_config(root: &Path) -> Result<Config, AppError> {
     })
 }
 
-fn select_files(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, AppError> {
-    paths
-        .iter()
-        .map(|path| {
-            let resolved = resolve_path(root, path);
-            match fs::metadata(&resolved) {
-                Ok(metadata) if metadata.is_file() => Ok(resolved),
-                Ok(_) => Err(AppError::Message(format!(
+fn select_files(root: &Path, config: &Config, paths: &[PathBuf]) -> Result<Vec<PathBuf>, AppError> {
+    let (rules, ignore_file) = build_ignore_rules(root, config)?;
+    let mut selected = Vec::new();
+    for path in paths {
+        let resolved = resolve_path(root, path);
+        let relative = normalize_relative_path(root, &resolved);
+        if ignore_file.as_deref() == Some(relative.as_str())
+            || is_ignored(&relative, false, &rules)?
+        {
+            continue;
+        }
+        match fs::metadata(&resolved) {
+            Ok(metadata) if metadata.is_file() => selected.push(resolved),
+            Ok(_) => {
+                return Err(AppError::Message(format!(
                     "Path is not a file: {}",
                     path.display()
-                ))),
-                Err(error) => Err(AppError::Io(error)),
+                )));
             }
-        })
-        .collect()
+            Err(error) => return Err(AppError::Io(error)),
+        }
+    }
+    Ok(selected)
 }
 
 fn load_config(
@@ -247,36 +255,7 @@ fn resolve_path(root: &Path, path: &Path) -> PathBuf {
 }
 
 fn discover_files(root: &Path, config: &Config) -> Result<Vec<PathBuf>, AppError> {
-    let mut rules = Vec::new();
-
-    if let Some(ignore_file) = &config.ignore_file {
-        let ignore_path = resolve_path(root, ignore_file);
-        let contents = fs::read_to_string(&ignore_path)?;
-        for line in contents.lines() {
-            if let Some(rule) = IgnoreRule::parse(line, true) {
-                rules.push(rule?);
-            }
-        }
-    }
-
-    for pattern in &config.ignore {
-        if let Some(rule) = IgnoreRule::parse(pattern, false) {
-            rules.push(rule?);
-        }
-    }
-
-    if !config.ignore_default_ignores {
-        for pattern in DEFAULT_IGNORES {
-            rules.push(
-                IgnoreRule::parse(pattern, false).expect("default ignore patterns are valid")?,
-            );
-        }
-    }
-
-    let ignore_file = config
-        .ignore_file
-        .as_ref()
-        .map(|path| normalize_relative_path(root, &resolve_path(root, path)));
+    let (rules, ignore_file) = build_ignore_rules(root, config)?;
     let mut paths = Vec::new();
 
     let walker = WalkDir::new(root)
@@ -312,6 +291,43 @@ fn discover_files(root: &Path, config: &Config) -> Result<Vec<PathBuf>, AppError
     }
 
     Ok(paths)
+}
+
+fn build_ignore_rules(
+    root: &Path,
+    config: &Config,
+) -> Result<(Vec<IgnoreRule>, Option<String>), AppError> {
+    let mut rules = Vec::new();
+
+    if let Some(ignore_file) = &config.ignore_file {
+        let ignore_path = resolve_path(root, ignore_file);
+        let contents = fs::read_to_string(&ignore_path)?;
+        for line in contents.lines() {
+            if let Some(rule) = IgnoreRule::parse(line, true) {
+                rules.push(rule?);
+            }
+        }
+    }
+
+    for pattern in &config.ignore {
+        if let Some(rule) = IgnoreRule::parse(pattern, false) {
+            rules.push(rule?);
+        }
+    }
+
+    if !config.ignore_default_ignores {
+        for pattern in DEFAULT_IGNORES {
+            rules.push(
+                IgnoreRule::parse(pattern, false).expect("default ignore patterns are valid")?,
+            );
+        }
+    }
+
+    let ignore_file = config
+        .ignore_file
+        .as_ref()
+        .map(|path| normalize_relative_path(root, &resolve_path(root, path)));
+    Ok((rules, ignore_file))
 }
 
 fn normalize_relative_path(root: &Path, path: &Path) -> String {
@@ -1067,6 +1083,34 @@ mod tests {
         assert_eq!(report.inserted, vec![PathBuf::from("selected.toml")]);
         assert_eq!(
             fs::read_to_string(directory.path().join("unselected.toml")).unwrap(),
+            "body\n"
+        );
+    }
+
+    #[test]
+    fn skips_selected_paths_in_config_ignore_list() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("LICENSE"), "license text\n").unwrap();
+        fs::write(directory.path().join("ignored.toml"), "body\n").unwrap();
+        fs::write(
+            directory.path().join("config.json"),
+            r#"{"license":"LICENSE","ignore":["ignored.toml"]}"#,
+        )
+        .unwrap();
+        let selected = [PathBuf::from("ignored.toml")];
+
+        let report = execute_paths(
+            directory.path(),
+            Some(Path::new("config.json")),
+            Mode::Add,
+            None,
+            &selected,
+        )
+        .unwrap();
+
+        assert!(report.inserted.is_empty());
+        assert_eq!(
+            fs::read_to_string(directory.path().join("ignored.toml")).unwrap(),
             "body\n"
         );
     }
