@@ -4,7 +4,16 @@ Rewrite of [license-check-and-add](https://github.com/awjh/license-check-and-add
 
 ## Install
 
+### mise (recommended)
+
+```
+mise use github:Unreal-Works/license-check-and-add
+```
+
+### cargo
+
 ```bash
+cargo binstall license-check-and-add
 cargo install license-check-and-add
 ```
 
